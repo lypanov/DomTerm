@@ -37,8 +37,9 @@ subst_run_command(struct options *opts, const char *browser_command,
     char *wpos;
     const char *url_fixed = url;
     char *url_tmp = NULL;
-    if (is_WindowsSubsystemForLinux() && strstr(browser_command, ".exe") != NULL) {
-        char *wsl_prefix = "file:///mnt/c/";
+    // TODO test firefox command setting for link response
+    if (is_WindowsSubsystemForLinux() && strstr(browser_command, "electron") != NULL) {
+        char *wsl_prefix = "file:///c/";
 	int wsl_prefix_length = strlen(wsl_prefix);
         if (memcmp(url, wsl_prefix, wsl_prefix_length) == 0) {
             url_tmp = xmalloc(strlen(url));
@@ -387,8 +388,9 @@ char *
 fix_for_windows(char * fname)
 {
     if (is_WindowsSubsystemForLinux()) {
+	    printf(fname);
         int fname_length = strlen(fname);
-        static char mnt_prefix[] = "/mnt/";
+        static char mnt_prefix[] = "/";
         static int mnt_prefix_length = sizeof(mnt_prefix)-1;
         if (memcmp(fname, mnt_prefix, mnt_prefix_length) == 0
             && fname_length > mnt_prefix_length) {
@@ -534,6 +536,53 @@ electron_command(struct options *options)
     return buf;
 }
 
+// You must free the result if result is non-NULL.
+char *str_replace(char *orig, char *rep, char *with) {
+    char *result; // the return string
+    char *ins;    // the next insert point
+    char *tmp;    // varies
+    int len_rep;  // length of rep (the string to remove)
+    int len_with; // length of with (the string to replace rep with)
+    int len_front; // distance between rep and end of last rep
+    int count;    // number of replacements
+
+    // sanity checks and initialization
+    if (!orig || !rep)
+        return NULL;
+    len_rep = strlen(rep);
+    if (len_rep == 0)
+        return NULL; // empty rep causes infinite loop during count
+    if (!with)
+        with = "";
+    len_with = strlen(with);
+
+    // count the number of replacements needed
+    ins = orig;
+    for (count = 0; tmp = strstr(ins, rep); ++count) {
+        ins = tmp + len_rep;
+    }
+
+    tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
+
+    if (!result)
+        return NULL;
+
+    // first time through the loop, all the variable are set correctly
+    // from here on,
+    //    tmp points to the end of the result string
+    //    ins points to the next occurrence of rep in orig
+    //    orig points to the remainder of orig after "end of rep"
+    while (count--) {
+        ins = strstr(orig, rep);
+        len_front = ins - orig;
+        tmp = strncpy(tmp, orig, len_front) + len_front;
+        tmp = strcpy(tmp, with) + len_with;
+        orig += len_front + len_rep; // move to next "end of rep"
+    }
+    strcpy(tmp, orig);
+    return result;
+}
+
 /** A freshly allocated command for 'open a URL'. */
 
 static char *
@@ -549,9 +598,12 @@ default_browser_command()
     // part of a "file:" URL, and may also use a non-preferred browser.
     char *path;
     bool free_needed = false;
-    if (is_WindowsSubsystemForLinux())
-        path = strdup("/mnt/c/Windows/System32/cmd.exe /c start");
-    else {
+    if (is_WindowsSubsystemForLinux()) {
+        const char *wsl_prefix = "/c";
+        const char *cmd = "/Windows/System32/cmd.exe /c start";
+        path = xmalloc(strlen(wsl_prefix) + strlen(cmd));
+        sprintf(path, "%s%s", wsl_prefix, cmd);
+    } else {
         path = find_in_path("xdg-open");
         if (path == NULL)
             path = find_in_path("kde-open");
@@ -569,7 +621,7 @@ default_link_command(const char *url)
     ShellExecute(0, 0, url, 0, 0 , SW_SHOW) > 32 ? 0 : 1;
 #else
     char *pattern = default_browser_command();
-    subst_run_command(main_options, pattern, url, 0);
+    subst_run_command(main_options, pattern, str_replace(url, "&", "^&"), 0);
     free(pattern);
 #endif
 }
@@ -1299,7 +1351,7 @@ static char *userprofile_cache;
 char *get_WSL_userprofile()
 {
     if (userprofile_cache == NULL) {
-        FILE *f = popen("/mnt/c/Windows/System32/cmd.exe /c \"<nul set /p=%UserProfile%\" 2>/dev/null", "r");
+        FILE *f = popen("/c/Windows/System32/cmd.exe /c \"<nul set /p=%UserProfile%\" 2>/dev/null", "r");
         if (f == NULL)
             return NULL;
         char buf[512];
@@ -1338,11 +1390,12 @@ domterm_dir(bool settings, bool check_wsl)
     if (xdg_home) {
 	tmp = xmalloc(strlen(xdg_home)+40);
 	sprintf(tmp, "%s/domterm%s", xdg_home, sini);
-    } else if (check_wsl && is_WindowsSubsystemForLinux()
-	&& (user_profile = get_WSL_userprofile()) != NULL
-	&& strlen(user_profile) > (user_prefix_length = strlen(user_prefix))
+    } else if (check_wsl && is_WindowsSubsystemForLinux() && printf("500\n")
+	&& (user_profile = get_WSL_userprofile()) != NULL && printf("600 %d\n", strlen(user_profile) )
+	&& strlen(user_profile) > (user_prefix_length = strlen(user_prefix))  && printf("700\n")
 	&& memcmp(user_profile, user_prefix, user_prefix_length) == 0) {
-	const char *fmt = "/mnt/c/Users/%s/AppData/%s/DomTerm%s";
+	    printf("got there!");
+	const char *fmt = "/c/Users/%s/AppData/%s/DomTerm%s";
 	char *subdir = settings ? "Roaming" : "Local";
 	tmp = xmalloc(strlen(fmt) + strlen(user_profile) + 40);
 	sprintf(tmp, fmt, user_profile+user_prefix_length, subdir, sini);
